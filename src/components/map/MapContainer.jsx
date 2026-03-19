@@ -67,6 +67,20 @@ function ZoomWatcher({ onZoomChange }) {
     return null;
 }
 
+function RecenterOnce({ position }) {
+    const map = useMap();
+    const [centered, setCentered] = useState(false);
+
+    useEffect(() => {
+        if (position && !centered) {
+            map.setView([position.lat, position.lng], 16);
+            setCentered(true);
+        }
+    }, [position, centered, map]);
+
+    return null;
+}
+
 export default function MapContainerComponent({ userPosition, gpsStatus }) {
     const [zoom, setZoom] = useState(15);
     const [locations, setLocations] = useState([]);
@@ -105,6 +119,7 @@ export default function MapContainerComponent({ userPosition, gpsStatus }) {
             >
                 <DynamicTileLayer styleId={mapStyle} />
                 <ZoomWatcher onZoomChange={handleZoom} />
+                <RecenterOnce position={userPosition} />
 
                 {/* Buildings */}
                 {visibleBuildings.map((feature) => {
