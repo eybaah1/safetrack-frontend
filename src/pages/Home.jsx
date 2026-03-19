@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import TopBar from '../components/layout/TopBar';
 import BottomSheet from '../components/layout/BottomSheet';
 import BottomNav from '../components/layout/BottomNav';
@@ -26,6 +26,11 @@ export default function Home({ onSignOut }) {
     const [showMenu, setShowMenu] = useState(false);
     const [currentLocation, setCurrentLocation] = useState('KNUST Campus');
 
+    // ── SHARED GPS STATE ───────────────────────────────
+    const [userPosition, setUserPosition] = useState(null);
+    const [gpsStatus, setGpsStatus] = useState('loading');
+    const watchIdRef = useRef(null);
+
     // Check for existing active SOS or walk on mount
     useEffect(() => {
         // Check active SOS
@@ -48,104 +53,145 @@ export default function Home({ onSignOut }) {
             .catch(() => {});
     }, []);
 
-    const handleSOSActivate = async () => {
-        toast.info('📍 Getting your location...');
-
-        // Try to get accurate GPS with longer timeout
-        let lat = null;
-        let lng = null;
-        let accuracy = null;
-        let locationText = '';
-
-        try {
-            const pos = await new Promise((resolve, reject) => {
-                navigator.geolocation.getCurrentPosition(
-                    resolve,
-                    reject,
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 15000,      // 15 seconds
-                        maximumAge: 5000,    // Accept cached position up to 5s old
-                    }
-                );
-            });
-            lat = pos.coords.latitude;
-            lng = pos.coords.longitude;
-            accuracy = pos.coords.accuracy;
-
-            // Check if location is reasonable (within Ghana roughly)
-            if (lat < 4 || lat > 12 || lng < -4 || lng > 2) {
-                console.warn('GPS returned suspicious coordinates:', lat, lng);
-                lat = null;
-                lng = null;
-            }
-        } catch (geoErr) {
-            console.warn('Geolocation failed:', geoErr.message);
+    // ── GPS TRACKING ───────────────────────────────────
+    useEffect(() => {
+        if (!navigator.geolocation) {
+            console.warn('Geolocation API not available');
+            setGpsStatus('failed');
+            fetchIPLocation();
+            return;
         }
 
-        // If GPS failed, try IP-based location as fallback
-        if (lat === null || lng === null) {
-            try {
-                const resp = await fetch('https://ipapi.co/json/', { timeout: 5000 });
-                const ipData = await resp.json();
-                if (ipData.latitude && ipData.longitude) {
-                    lat = ipData.latitude;
-                    lng = ipData.longitude;
-                    accuracy = 5000; // IP location is very rough
-                    locationText = ipData.city || '';
-                    console.log('Using IP-based location:', lat, lng);
+        let gotFirstFix = false;
+
+        // Try high accuracy first
+        watchIdRef.current = navigator.geolocation.watchPosition(
+            (pos) => {
+                const coords = {
+                    lat: pos.coords.latitude,
+                    lng: pos.coords.longitude,
+                    accuracy: pos.coords.accuracy,
+                };
+
+                console.log('GPS position:', coords.lat, coords.lng, 'accuracy:', coords.accuracy, 'm');
+
+                setUserPosition(coords);
+                setGpsStatus('active');
+                gotFirstFix = true;
+
+                // Send to backend
+                trackingAPI.updateLive({
+                    latitude: coords.lat,
+                    longitude: coords.lng,
+                    accuracy_meters: coords.accuracy,
+                    source: 'gps',
+                }).catch(() => {});
+            },
+            (err) => {
+                console.warn('GPS watchPosition error:', err.code, err.message);
+
+                if (err.code === 1) {
+                    console.error('GPS PERMISSION DENIED by user');
+                    setGpsStatus('denied');
+                } else {
+                    setGpsStatus('failed');
                 }
-            } catch {
-                console.warn('IP geolocation also failed');
+
+                if (!gotFirstFix) {
+                    fetchIPLocation();
+                }
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 30000,
+                maximumAge: 60000,
             }
+        );
+
+        // If no GPS fix after 10 seconds, also try IP as backup
+        const fallbackTimer = setTimeout(() => {
+            if (!gotFirstFix) {
+                console.log('No GPS fix after 10s, trying IP location...');
+                fetchIPLocation();
+            }
+        }, 10000);
+
+        return () => {
+            if (watchIdRef.current !== null) {
+                navigator.geolocation.clearWatch(watchIdRef.current);
+            }
+            clearTimeout(fallbackTimer);
+        };
+    }, []);
+
+    // IP-based location fallback
+    const fetchIPLocation = () => {
+        fetch('https://ipapi.co/json/')
+            .then(r => r.json())
+            .then(data => {
+                if (data.latitude && data.longitude) {
+                    const coords = { lat: data.latitude, lng: data.longitude, accuracy: 5000 };
+                    console.log('IP location:', coords.lat, coords.lng);
+
+                    setUserPosition(prev => {
+                        if (prev && prev.accuracy < 1000) return prev;
+                        return coords;
+                    });
+
+                    if (gpsStatus !== 'active') {
+                        setGpsStatus('ip_fallback');
+                    }
+
+                    trackingAPI.updateLive({
+                        latitude: coords.lat,
+                        longitude: coords.lng,
+                        accuracy_meters: 5000,
+                        source: 'network',
+                    }).catch(() => {});
+                }
+            })
+            .catch(() => {
+                setUserPosition(prev => prev || { lat: 6.6745, lng: -1.5716, accuracy: 10000 });
+            });
+    };
+
+    const handleSOSActivate = async () => {
+        const pos = userPosition || { lat: 6.6745, lng: -1.5716, accuracy: 10000 };
+        const hasRealGPS = gpsStatus === 'active' && pos.accuracy < 500;
+
+        if (!hasRealGPS) {
+            toast.error(`⚠️ Using approximate location (${Math.round(pos.accuracy || 5000)}m accuracy). Enable GPS for precise tracking.`);
+        } else {
+            toast.info(`📍 Sending your exact location (${Math.round(pos.accuracy)}m accuracy)...`);
         }
 
-        // Last resort — use KNUST center but warn the user
-        if (lat === null || lng === null) {
-            lat = 6.6745;
-            lng = -1.5716;
-            accuracy = 10000;
-            locationText = 'Location unavailable — KNUST Campus (approximate)';
-            toast.error('⚠️ Could not get your exact location. Enable GPS for accurate tracking.');
-        }
-
-        // Send SOS
         try {
-            console.log('Sending SOS with coordinates:', lat, lng, 'accuracy:', accuracy);
+            console.log('SOS coordinates:', pos.lat, pos.lng, 'accuracy:', pos.accuracy, 'gpsStatus:', gpsStatus);
 
             const { data } = await sosAPI.trigger({
-                latitude: lat,
-                longitude: lng,
-                accuracy_meters: accuracy,
-                location_text: locationText,
+                latitude: pos.lat,
+                longitude: pos.lng,
+                accuracy_meters: pos.accuracy || 10000,
+                location_text: hasRealGPS ? '' : `Approximate location (${gpsStatus})`,
                 trigger_method: 'button',
             });
 
-            // Start live location tracking immediately
             await trackingAPI.toggleSharing(true).catch(() => {});
-
-            // Send first live update with the same coordinates
             await trackingAPI.updateLive({
-                latitude: lat,
-                longitude: lng,
-                accuracy_meters: accuracy,
-                source: 'gps',
+                latitude: pos.lat,
+                longitude: pos.lng,
+                accuracy_meters: pos.accuracy || 10000,
+                source: hasRealGPS ? 'gps' : 'network',
                 context: 'sos',
                 reference_id: data.alert?.id,
             }).catch(() => {});
 
-            setActiveAlert(data.alert);
+            setActiveAlert({ ...data.alert, lat: pos.lat, lng: pos.lng });
             setIsEmergencyMode(true);
             toast.error('🚨 SOS Alert Sent! Security has been notified.');
         } catch (err) {
             console.error('SOS ERROR:', err.response?.data || err);
-            const msg = err.response?.data?.error
-                || err.response?.data?.detail
-                || (typeof err.response?.data === 'object'
-                    ? JSON.stringify(err.response.data)
-                    : null)
-                || 'Failed to send SOS. Try again!';
-            toast.error(msg);
+            toast.error(err.response?.data?.error || 'Failed to send SOS. Try again!');
         }
     };
 
@@ -186,6 +232,31 @@ export default function Home({ onSignOut }) {
                 onMenuClick={() => setShowMenu(true)}
                 onSearchClick={() => setShowSearch(true)}
             />
+
+            {/* GPS status banner */}
+            {(gpsStatus === 'failed' || gpsStatus === 'denied' || gpsStatus === 'ip_fallback') && (
+                <div style={{
+                    position: 'absolute', top: '68px', left: '16px', right: '16px', zIndex: 1000,
+                    backgroundColor: gpsStatus === 'denied' ? 'rgba(220,38,38,0.95)' : 'rgba(212,160,23,0.95)',
+                    borderRadius: '12px', padding: '10px 14px',
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                }}>
+                    <span style={{ fontSize: '13px', color: 'white', flex: 1 }}>
+                        {gpsStatus === 'denied'
+                            ? '🚫 Location permission denied. Tap the lock icon in your browser to enable it.'
+                            : '📍 Using approximate location. Enable GPS in your browser settings for accuracy.'
+                        }
+                    </span>
+                    <button
+                        onClick={() => setGpsStatus('dismissed')}
+                        type="button"
+                        style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', padding: '4px' }}
+                    >
+                        ✕
+                    </button>
+                </div>
+            )}
 
             <QuickActionChips onWalkWithMe={() => setShowWalkModal(true)} />
 
