@@ -33,7 +33,6 @@ export default function Home({ onSignOut }) {
 
     // Check for existing active SOS or walk on mount
     useEffect(() => {
-        // Check active SOS
         sosAPI.myActive()
             .then(({ data }) => {
                 if (data.has_active && data.alert) {
@@ -43,7 +42,6 @@ export default function Home({ onSignOut }) {
             })
             .catch(() => {});
 
-        // Check active walk
         walksAPI.myActive()
             .then(({ data }) => {
                 if (data.has_active && data.walk) {
@@ -64,7 +62,6 @@ export default function Home({ onSignOut }) {
 
         let gotFirstFix = false;
 
-        // Try high accuracy first
         watchIdRef.current = navigator.geolocation.watchPosition(
             (pos) => {
                 const coords = {
@@ -79,7 +76,6 @@ export default function Home({ onSignOut }) {
                 setGpsStatus('active');
                 gotFirstFix = true;
 
-                // Send to backend
                 trackingAPI.updateLive({
                     latitude: coords.lat,
                     longitude: coords.lng,
@@ -108,7 +104,6 @@ export default function Home({ onSignOut }) {
             }
         );
 
-        // If no GPS fix after 10 seconds, also try IP as backup
         const fallbackTimer = setTimeout(() => {
             if (!gotFirstFix) {
                 console.log('No GPS fix after 10s, trying IP location...');
@@ -124,7 +119,6 @@ export default function Home({ onSignOut }) {
         };
     }, []);
 
-    // IP-based location fallback
     const fetchIPLocation = () => {
         fetch('https://ipapi.co/json/')
             .then(r => r.json())
@@ -213,19 +207,18 @@ export default function Home({ onSignOut }) {
         setCurrentLocation(location.name);
     };
 
-    // Show Emergency Mode
     if (isEmergencyMode) {
         return <EmergencyMode alertData={activeAlert} onCancel={handleEmergencyCancel} />;
     }
 
-    // Show Active Walk
     if (activeWalk) {
         return <ActiveWalkScreen walkData={activeWalk} onEndWalk={handleEndWalk} />;
     }
 
     return (
         <div className="relative w-full h-screen overflow-hidden bg-bg-primary">
-            <MapContainerComponent />
+            {/* ★ THIS IS THE FIX — pass userPosition and gpsStatus */}
+            <MapContainerComponent userPosition={userPosition} gpsStatus={gpsStatus} />
 
             <TopBar
                 currentLocation={currentLocation}
@@ -233,7 +226,6 @@ export default function Home({ onSignOut }) {
                 onSearchClick={() => setShowSearch(true)}
             />
 
-            {/* GPS status banner */}
             {(gpsStatus === 'failed' || gpsStatus === 'denied' || gpsStatus === 'ip_fallback') && (
                 <div style={{
                     position: 'absolute', top: '68px', left: '16px', right: '16px', zIndex: 1000,
