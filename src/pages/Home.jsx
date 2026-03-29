@@ -11,6 +11,7 @@ import ActiveWalkScreen from '../components/ActiveWalkScreen';
 import SearchModal from '../components/SearchModal';
 import MenuDrawer from '../components/MenuDrawer';
 import AIChatBot from '../components/AIChatBot';
+import ReportIssueModal from '../components/ReportIssueModal';
 import useToast from '../hooks/useToast.js';
 import sosAPI from '../api/sos';
 import walksAPI from '../api/walks';
@@ -24,6 +25,7 @@ export default function Home({ onSignOut }) {
     const [activeWalk, setActiveWalk] = useState(null);
     const [showSearch, setShowSearch] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
+    const [showReportIssue, setShowReportIssue] = useState(false);
     const [currentLocation, setCurrentLocation] = useState('KNUST Campus');
 
     // ── SHARED GPS STATE ───────────────────────────────
@@ -217,7 +219,6 @@ export default function Home({ onSignOut }) {
 
     return (
         <div className="relative w-full h-screen overflow-hidden bg-bg-primary">
-            {/* ★ THIS IS THE FIX — pass userPosition and gpsStatus */}
             <MapContainerComponent userPosition={userPosition} gpsStatus={gpsStatus} />
 
             <TopBar
@@ -250,7 +251,10 @@ export default function Home({ onSignOut }) {
                 </div>
             )}
 
-            <QuickActionChips onWalkWithMe={() => setShowWalkModal(true)} />
+            <QuickActionChips
+                onWalkWithMe={() => setShowWalkModal(true)}
+                onReport={() => setShowReportIssue(true)}
+            />
 
             <BottomSheet />
 
@@ -276,6 +280,12 @@ export default function Home({ onSignOut }) {
                 isOpen={showMenu}
                 onClose={() => setShowMenu(false)}
                 onSignOut={onSignOut}
+            />
+
+            <ReportIssueModal
+                isOpen={showReportIssue}
+                onClose={() => setShowReportIssue(false)}
+                userPosition={userPosition}
             />
         </div>
     );
