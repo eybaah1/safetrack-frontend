@@ -28,12 +28,10 @@ export default function Home({ onSignOut }) {
     const [showReportIssue, setShowReportIssue] = useState(false);
     const [currentLocation, setCurrentLocation] = useState('KNUST Campus');
 
-    // ── SHARED GPS STATE ───────────────────────────────
     const [userPosition, setUserPosition] = useState(null);
     const [gpsStatus, setGpsStatus] = useState('loading');
     const watchIdRef = useRef(null);
 
-    // Check for existing active SOS or walk on mount
     useEffect(() => {
         sosAPI.myActive()
             .then(({ data }) => {
@@ -53,7 +51,6 @@ export default function Home({ onSignOut }) {
             .catch(() => {});
     }, []);
 
-    // ── GPS TRACKING ───────────────────────────────────
     useEffect(() => {
         if (!navigator.geolocation) {
             console.warn('Geolocation API not available');
@@ -71,9 +68,6 @@ export default function Home({ onSignOut }) {
                     lng: pos.coords.longitude,
                     accuracy: pos.coords.accuracy,
                 };
-
-                console.log('GPS position:', coords.lat, coords.lng, 'accuracy:', coords.accuracy, 'm');
-
                 setUserPosition(coords);
                 setGpsStatus('active');
                 gotFirstFix = true;
@@ -86,18 +80,12 @@ export default function Home({ onSignOut }) {
                 }).catch(() => {});
             },
             (err) => {
-                console.warn('GPS watchPosition error:', err.code, err.message);
-
                 if (err.code === 1) {
-                    console.error('GPS PERMISSION DENIED by user');
                     setGpsStatus('denied');
                 } else {
                     setGpsStatus('failed');
                 }
-
-                if (!gotFirstFix) {
-                    fetchIPLocation();
-                }
+                if (!gotFirstFix) fetchIPLocation();
             },
             {
                 enableHighAccuracy: true,
@@ -107,10 +95,7 @@ export default function Home({ onSignOut }) {
         );
 
         const fallbackTimer = setTimeout(() => {
-            if (!gotFirstFix) {
-                console.log('No GPS fix after 10s, trying IP location...');
-                fetchIPLocation();
-            }
+            if (!gotFirstFix) fetchIPLocation();
         }, 10000);
 
         return () => {
@@ -127,16 +112,11 @@ export default function Home({ onSignOut }) {
             .then(data => {
                 if (data.latitude && data.longitude) {
                     const coords = { lat: data.latitude, lng: data.longitude, accuracy: 5000 };
-                    console.log('IP location:', coords.lat, coords.lng);
-
                     setUserPosition(prev => {
                         if (prev && prev.accuracy < 1000) return prev;
                         return coords;
                     });
-
-                    if (gpsStatus !== 'active') {
-                        setGpsStatus('ip_fallback');
-                    }
+                    if (gpsStatus !== 'active') setGpsStatus('ip_fallback');
 
                     trackingAPI.updateLive({
                         latitude: coords.lat,
@@ -162,8 +142,6 @@ export default function Home({ onSignOut }) {
         }
 
         try {
-            console.log('SOS coordinates:', pos.lat, pos.lng, 'accuracy:', pos.accuracy, 'gpsStatus:', gpsStatus);
-
             const { data } = await sosAPI.trigger({
                 latitude: pos.lat,
                 longitude: pos.lng,
@@ -186,7 +164,6 @@ export default function Home({ onSignOut }) {
             setIsEmergencyMode(true);
             toast.error('🚨 SOS Alert Sent! Security has been notified.');
         } catch (err) {
-            console.error('SOS ERROR:', err.response?.data || err);
             toast.error(err.response?.data?.error || 'Failed to send SOS. Try again!');
         }
     };
